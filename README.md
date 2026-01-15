@@ -239,19 +239,16 @@ The backend is containerized and ready for deployment with Docker.
    docker-compose up -d
    ```
 
-4. **Initialize the database** (first time only):
-   ```bash
-   docker-compose exec site node -e "require('./build/server/index.js')"
-   ```
-
    The backend will be available at `http://localhost:3000`. The database is persisted in the `./data` directory.
 
-5. **View logs:**
+   **Note:** Database migrations run automatically on startup - no manual database initialization needed!
+
+4. **View logs:**
    ```bash
    docker-compose logs -f site
    ```
 
-6. **Stop the service:**
+5. **Stop the service:**
    ```bash
    docker-compose down
    ```
@@ -287,6 +284,7 @@ The backend is containerized and ready for deployment with Docker.
 - **HTTPS Required**: Service workers require HTTPS. Use a reverse proxy (nginx, Caddy, Traefik) with SSL certificates.
 - **Database Backup**: Regularly backup the `/data` volume containing the SQLite database.
 - **Environment Variables**: Use Docker secrets or a secure secrets manager for VAPID keys.
+- **Database Migrations**: Migrations run automatically on startup from the `drizzle/` folder. When deploying schema changes, ensure the migration files are committed to git.
 - **Resource Limits**: Set appropriate memory/CPU limits in production:
   ```yaml
   deploy:
@@ -295,6 +293,18 @@ The backend is containerized and ready for deployment with Docker.
         cpus: '0.5'
         memory: 512M
   ```
+
+#### Database Schema Updates in Production
+
+When you need to update the database schema:
+
+1. Make changes to `site/src/lib/server/db/schema.ts`
+2. Generate migrations: `cd site && npm run db:generate`
+3. Review the generated SQL in `drizzle/XXXX_*.sql`
+4. Commit the migration files to git
+5. Deploy - migrations run automatically via `hooks.server.ts` on startup
+
+**Note:** Development uses `db:push` for rapid iteration, but production uses proper migrations that are committed to the repository.
 
 #### Reverse Proxy Example (nginx)
 

@@ -33,7 +33,7 @@ npm install
 npx web-push generate-vapid-keys
 # Copy keys to .env file (see site/.env.example)
 
-# Push database schema to SQLite
+# Push database schema to SQLite (development only)
 npm run db:push
 
 # Start development server (http://localhost:5173)
@@ -57,8 +57,9 @@ npm run test        # Run once
 npm run test:unit   # Watch mode
 
 # Database management
-npm run db:generate  # Generate migrations
-npm run db:migrate   # Run migrations
+npm run db:push      # Push schema changes (development only - not for production)
+npm run db:generate  # Generate migrations from schema (commit these for production)
+npm run db:migrate   # Run migrations (alternative to db:push)
 npm run db:studio    # Open Drizzle Studio
 ```
 
@@ -79,6 +80,29 @@ docker run -d -p 3000:3000 \            # Run container
   -e VAPID_SUBJECT="mailto:..." \
   claude-afk-site
 ```
+
+### Database Migrations & Production Deployment
+
+The project uses Drizzle ORM with SQLite. Database schema changes work differently in development vs production:
+
+**Development:**
+- Use `npm run db:push` to sync schema changes directly to your local database
+- Fast iteration, no migration files generated
+
+**Production:**
+- Schema changes must be generated as migration files: `npm run db:generate`
+- Commit the generated `drizzle/` folder to git
+- Migrations run automatically on app startup via `hooks.server.ts`
+- No need for `drizzle-kit` in production - migrations use only `drizzle-orm`
+
+**Workflow for schema changes:**
+1. Edit `src/lib/server/db/schema.ts`
+2. Generate migration: `cd site && npm run db:generate`
+3. Review generated SQL in `drizzle/` folder
+4. Commit migration files to git
+5. Deploy - migrations run automatically on container startup
+
+**Note:** The Dockerfile copies the `drizzle/` folder and migrations run via `drizzle-orm/better-sqlite3/migrator` which doesn't require `drizzle-kit`. The `npm prune --production` step removes `drizzle-kit` but keeps `drizzle-orm` which is all that's needed to run migrations.
 
 ### CLI (Rust)
 

@@ -32,7 +32,7 @@ RUN npm run build
 RUN rm .env
 
 # Remove dev dependencies
-RUN npm prune --production
+RUN npm prune --omit=dev
 
 # Stage 2: Production
 FROM node:20-slim
@@ -49,6 +49,7 @@ COPY --from=builder /app/build ./build
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/static ./static
+COPY --from=builder /app/drizzle ./drizzle
 
 # Create directory for database volume
 RUN mkdir -p /data
