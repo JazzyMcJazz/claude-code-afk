@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { urlBase64ToUint8Array } from '$lib/utils';
 	import type { PageProps } from './$types';
 
@@ -8,7 +9,7 @@
 		'idle'
 	);
 	let errorMessage = $state('');
-	let notificationsSupported = $derived('serviceWorker' in navigator && 'PushManager' in window);
+	let notificationsSupported = $derived(browser && 'serviceWorker' in navigator && 'PushManager' in window);
 
 	async function enableNotifications() {
 		try {
