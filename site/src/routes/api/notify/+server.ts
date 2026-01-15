@@ -30,6 +30,8 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const { title, message } = await request.json();
 
+	console.log('Sending notification:', { title, message });
+
 	if (!message) {
 		error(400, 'Message is required');
 	}
