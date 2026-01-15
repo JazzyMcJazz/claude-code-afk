@@ -29,8 +29,11 @@ struct Cli {
 enum Commands {
     /// Set up device pairing by scanning a QR code
     Setup,
-    /// Send a notification (reads JSON from stdin)
-    Notify,
+    /// Send a notification (accepts JSON as argument or reads from stdin)
+    Notify {
+        /// JSON input (if not provided, reads from stdin)
+        json: Option<String>,
+    },
     /// Show current configuration status
     Status,
     /// Enable notifications
@@ -80,7 +83,7 @@ fn main() {
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Setup => cmd_setup(),
-        Commands::Notify => cmd_notify(),
+        Commands::Notify { json } => cmd_notify(json),
         Commands::Status => cmd_status(),
         Commands::Activate => cmd_activate(),
         Commands::Deactivate => cmd_deactivate(),
@@ -162,7 +165,7 @@ fn cmd_setup() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn cmd_notify() -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_notify(json_arg: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let config = load_config()?;
 
     // Silent exit if not configured or not active
@@ -173,9 +176,15 @@ fn cmd_notify() -> Result<(), Box<dyn std::error::Error>> {
     let device_token = config.device_token.unwrap();
     let backend_url = get_backend_url();
 
-    // Read JSON from stdin
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    // Use JSON from argument if provided, otherwise read from stdin
+    let input = match json_arg {
+        Some(json) => json,
+        None => {
+            let mut buf = String::new();
+            io::stdin().read_to_string(&mut buf)?;
+            buf
+        }
+    };
 
     let notify_input: NotifyInput = match serde_json::from_str(&input) {
         Ok(v) => v,
