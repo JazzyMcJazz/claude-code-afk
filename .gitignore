@@ -1,0 +1,12 @@
+.vscode/
+.claude/
+target/
+.DS_Store
+
+# Docker volumes
+data/
+
+# Environment files
+.env
+.env.local
+.env.*.local
