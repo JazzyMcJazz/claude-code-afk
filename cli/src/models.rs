@@ -43,7 +43,8 @@ pub struct PreToolUseInput {
     pub hook_event_name: String,
     pub tool_name: String,
     pub tool_input: Value,
-    pub tool_use_id: String,
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
 }
 
 /// Bash tool input

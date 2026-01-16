@@ -1,5 +1,6 @@
 use std::{io::Read, thread, time::Instant};
 
+use nanoid::nanoid;
 use qrcode::{render::unicode::Dense1x2, QrCode};
 
 use crate::{
@@ -76,6 +77,7 @@ impl Cmd {
         if config.device_token.is_none() || !config.active {
             let output = HookOutput::ask(None);
             println!("{}", serde_json::to_string(&output)?);
+            Logger::info("Not configured or not active, falling back to asking user normally");
             return Ok(());
         }
 
@@ -95,13 +97,20 @@ impl Cmd {
         let pre_tool_use: PreToolUseInput = match serde_json::from_str(&input) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("Failed to parse PreToolUse input: {}", e);
+                Logger::error(&format!("Failed to parse PreToolUse input: {}", e));
+                Logger::debug(&format!("PreToolUse input: {}", input));
                 // Fall back to normal permission flow
                 let output = HookOutput::ask(None);
                 println!("{}", serde_json::to_string(&output)?);
                 return Ok(());
             }
         };
+
+        // Generate or use provided tool_use_id
+        let tool_use_id = pre_tool_use
+            .tool_use_id
+            .clone()
+            .unwrap_or_else(|| nanoid!(21));
 
         // Parse tool-specific information
         let tool_info = ToolInfo::from_pre_tool_use(&pre_tool_use);
@@ -110,7 +119,7 @@ impl Cmd {
         let payload = NotifyPayload {
             title,
             message,
-            tool_use_id: pre_tool_use.tool_use_id.clone(),
+            tool_use_id: tool_use_id.clone(),
             session_id: pre_tool_use.session_id.clone(),
         };
 
@@ -123,14 +132,14 @@ impl Cmd {
                 Ok(resp) => match resp.into_json() {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!("Failed to parse notify response: {}", e);
+                        Logger::error(&format!("Failed to parse notify response: {}", e));
                         let output = HookOutput::ask(None);
                         println!("{}", serde_json::to_string(&output)?);
                         return Ok(());
                     }
                 },
                 Err(e) => {
-                    eprintln!("Failed to send notification: {}", e);
+                    Logger::error(&format!("Failed to send notification: {}", e));
                     let output = HookOutput::ask(None);
                     println!("{}", serde_json::to_string(&output)?);
                     return Ok(());
@@ -161,12 +170,12 @@ impl Cmd {
                 Ok(resp) => match resp.into_json() {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!("Failed to parse decision status: {}", e);
+                        Logger::error(&format!("Failed to parse decision status: {}", e));
                         continue;
                     }
                 },
                 Err(e) => {
-                    eprintln!("Failed to poll decision status: {}", e);
+                    Logger::error(&format!("Failed to poll decision status: {}", e));
                     continue;
                 }
             };
@@ -181,6 +190,7 @@ impl Cmd {
                         }
                         _ => {
                             // Dismissed or unknown decision - fall back to ask
+                            Logger::debug("Dismissed or unknown decision, falling back to asking user normally");
                             let output = HookOutput::ask(Some("Dismissed on phone".to_string()));
                             println!("{}", serde_json::to_string(&output)?);
                             return Ok(());
@@ -188,15 +198,21 @@ impl Cmd {
                     }
                 }
                 "expired" => {
+                    Logger::debug("Decision expired, falling back to asking user normally");
                     let output = HookOutput::ask(Some("Decision expired".to_string()));
                     println!("{}", serde_json::to_string(&output)?);
                     return Ok(());
                 }
                 "pending" => {
                     // Continue polling
+                    Logger::debug("Decision pending, continuing to poll");
                 }
                 _ => {
-                    // Unknown status - continue polling
+                    // Unknown status - fall back to asking user normally
+                    Logger::debug("Unknown decision status, falling back to asking user normally");
+                    let output = HookOutput::ask(Some("Unknown decision status".to_string()));
+                    println!("{}", serde_json::to_string(&output)?);
+                    return Ok(());
                 }
             }
         }
@@ -387,7 +403,7 @@ mod tests {
 
         assert_eq!(input.session_id, "sess-123");
         assert_eq!(input.tool_name, "Bash");
-        assert_eq!(input.tool_use_id, "tool-456");
+        assert_eq!(input.tool_use_id, Some("tool-456".to_string()));
     }
 
     #[test]
@@ -405,6 +421,7 @@ mod tests {
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Write");
+        assert_eq!(input.tool_use_id, Some("tool-789".to_string()));
     }
 
     #[test]
@@ -422,6 +439,7 @@ mod tests {
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Edit");
+        assert_eq!(input.tool_use_id, Some("tool-101".to_string()));
     }
 
     #[test]
@@ -439,6 +457,25 @@ mod tests {
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Read");
+        assert_eq!(input.tool_use_id, Some("tool-202".to_string()));
+    }
+
+    #[test]
+    fn test_pre_tool_use_input_parse_missing_tool_use_id() {
+        let json = r#"{
+            "session_id": "sess-123",
+            "transcript_path": "/tmp/transcript.json",
+            "cwd": "/home/user/project",
+            "permission_mode": "default",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"}
+        }"#;
+        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.session_id, "sess-123");
+        assert_eq!(input.tool_name, "Bash");
+        assert!(input.tool_use_id.is_none());
     }
 
     // ==================== ToolInfo Parsing Tests ====================
@@ -452,8 +489,7 @@ mod tests {
             "permission_mode": "default",
             "hook_event_name": "PreToolUse",
             "tool_name": "Bash",
-            "tool_input": {"command": "npm test", "description": "Run unit tests"},
-            "tool_use_id": "tool-456"
+            "tool_input": {"command": "npm test", "description": "Run unit tests"}
         }"#;
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
@@ -479,8 +515,7 @@ mod tests {
             "permission_mode": "default",
             "hook_event_name": "PreToolUse",
             "tool_name": "Write",
-            "tool_input": {"file_path": "/home/user/file.txt", "content": "Hello world"},
-            "tool_use_id": "tool-789"
+            "tool_input": {"file_path": "/home/user/file.txt", "content": "Hello world"}
         }"#;
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
@@ -506,8 +541,7 @@ mod tests {
             "permission_mode": "default",
             "hook_event_name": "PreToolUse",
             "tool_name": "Edit",
-            "tool_input": {"file_path": "/home/user/file.txt", "old_string": "foo", "new_string": "bar"},
-            "tool_use_id": "tool-101"
+            "tool_input": {"file_path": "/home/user/file.txt", "old_string": "foo", "new_string": "bar"}
         }"#;
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
@@ -535,8 +569,7 @@ mod tests {
             "permission_mode": "default",
             "hook_event_name": "PreToolUse",
             "tool_name": "SomeOtherTool",
-            "tool_input": {"some_field": "some_value"},
-            "tool_use_id": "tool-303"
+            "tool_input": {"some_field": "some_value"}
         }"#;
         let input: PreToolUseInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);

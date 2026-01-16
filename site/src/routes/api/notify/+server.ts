@@ -75,7 +75,13 @@ export const POST: RequestHandler = async ({ request }) => {
 			tag: tool_use_id,
 			renotify: true,
 			requireInteraction: true,
-			actions: [{ action: 'allow', title: 'Allow' }],
+			actions: [
+				{
+					action: 'allow',
+					title: 'Allow',
+					icon: '/icon-192.png'
+				}
+			],
 			data: {
 				decisionId,
 				toolUseId: tool_use_id,

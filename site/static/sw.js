@@ -30,7 +30,7 @@ async function submitDecision(decisionId, toolUseId, decision) {
 }
 
 sw.addEventListener('push', (event) => {
-    /** @type {{ title?: string; body?: string; icon?: string; badge?: string; data?: object; tag?: string; renotify?: boolean; requireInteraction?: boolean; actions?: Array<{action: string; title: string}> } | null} */
+    /** @type {{ title?: string; body?: string; icon?: string; badge?: string; data?: object; tag?: string; renotify?: boolean; requireInteraction?: boolean; actions?: Array<{action: string; title: string; icon?: string}> } | null} */
     const data = event.data?.json() ?? {};
 
     const title = data?.title || 'Claude Code';
