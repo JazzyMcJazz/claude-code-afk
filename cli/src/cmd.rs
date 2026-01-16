@@ -11,7 +11,7 @@ use crate::{
     logger::Logger,
     models::{
         DecisionStatusResponse, HookOutput, NotifyPayload, NotifyResponse, PairingInitResponse,
-        PairingStatusResponse, PreToolUseInput, ToolInfo,
+        PairingStatusResponse, PermissionRequestInput, ToolInfo,
     },
 };
 
@@ -75,10 +75,7 @@ impl Cmd {
 
         // If not configured or not active, fall back to asking user normally
         if config.device_token.is_none() || !config.active {
-            let output = HookOutput::ask(None);
-            println!("{}", serde_json::to_string(&output)?);
-            Logger::info("Not configured or not active, falling back to asking user normally");
-            return Ok(());
+            std::process::exit(0);
         }
 
         let device_token = config.device_token.unwrap();
@@ -94,15 +91,11 @@ impl Cmd {
             }
         };
 
-        let pre_tool_use: PreToolUseInput = match serde_json::from_str(&input) {
+        let pre_tool_use: PermissionRequestInput = match serde_json::from_str(&input) {
             Ok(v) => v,
             Err(e) => {
-                Logger::error(&format!("Failed to parse PreToolUse input: {}", e));
-                Logger::debug(&format!("PreToolUse input: {}", input));
-                // Fall back to normal permission flow
-                let output = HookOutput::ask(None);
-                println!("{}", serde_json::to_string(&output)?);
-                return Ok(());
+                eprintln!("{}", &format!("Failed to parse PermissionRequest input: {}", e));
+                std::process::exit(1);
             }
         };
 
@@ -132,17 +125,13 @@ impl Cmd {
                 Ok(resp) => match resp.into_json() {
                     Ok(r) => r,
                     Err(e) => {
-                        Logger::error(&format!("Failed to parse notify response: {}", e));
-                        let output = HookOutput::ask(None);
-                        println!("{}", serde_json::to_string(&output)?);
-                        return Ok(());
+                        eprintln!("{}", &format!("Failed to parse notify response: {}", e));
+                        std::process::exit(1);
                     }
                 },
                 Err(e) => {
-                    Logger::error(&format!("Failed to send notification: {}", e));
-                    let output = HookOutput::ask(None);
-                    println!("{}", serde_json::to_string(&output)?);
-                    return Ok(());
+                    eprintln!("{}", &format!("Failed to send notification: {}", e));
+                    std::process::exit(1);
                 }
             };
 
@@ -153,9 +142,8 @@ impl Cmd {
         loop {
             if start.elapsed() > DECISION_TIMEOUT {
                 // Timeout - fall back to ask
-                let output = HookOutput::ask(Some("Decision timed out".to_string()));
-                println!("{}", serde_json::to_string(&output)?);
-                return Ok(());
+                eprintln!("Decision timed out");
+                std::process::exit(1);
             }
 
             thread::sleep(DECISION_POLL_INTERVAL);
@@ -170,13 +158,13 @@ impl Cmd {
                 Ok(resp) => match resp.into_json() {
                     Ok(r) => r,
                     Err(e) => {
-                        Logger::error(&format!("Failed to parse decision status: {}", e));
-                        continue;
+                        eprintln!("{}", &format!("Failed to parse decision status: {}", e));
+                        std::process::exit(1);
                     }
                 },
                 Err(e) => {
-                    Logger::error(&format!("Failed to poll decision status: {}", e));
-                    continue;
+                    eprintln!("{}", &format!("Failed to poll decision status: {}", e));
+                    std::process::exit(1);
                 }
             };
 
@@ -184,24 +172,25 @@ impl Cmd {
                 "decided" => {
                     match status_response.decision.as_deref() {
                         Some("allow") => {
-                            let output = HookOutput::allow(Some("Approved via phone".to_string()));
+                            let output = HookOutput::allow();
                             println!("{}", serde_json::to_string(&output)?);
                             return Ok(());
                         }
-                        _ => {
-                            // Dismissed or unknown decision - fall back to ask
-                            Logger::debug("Dismissed or unknown decision, falling back to asking user normally");
-                            let output = HookOutput::ask(Some("Dismissed on phone".to_string()));
+                        Some("deny") => {
+                            let output = HookOutput::deny(None);
                             println!("{}", serde_json::to_string(&output)?);
                             return Ok(());
+                        }
+                        Some("dismiss") => {
+                            // Dismissed decision - exit silently
+                            std::process::exit(0);
+                        },
+                        _ => {
+                            // Unknown decision - exit silently
+                            eprintln!("Unknown decision");
+                            std::process::exit(1);
                         }
                     }
-                }
-                "expired" => {
-                    Logger::debug("Decision expired, falling back to asking user normally");
-                    let output = HookOutput::ask(Some("Decision expired".to_string()));
-                    println!("{}", serde_json::to_string(&output)?);
-                    return Ok(());
                 }
                 "pending" => {
                     // Continue polling
@@ -209,10 +198,8 @@ impl Cmd {
                 }
                 _ => {
                     // Unknown status - fall back to asking user normally
-                    Logger::debug("Unknown decision status, falling back to asking user normally");
-                    let output = HookOutput::ask(Some("Unknown decision status".to_string()));
-                    println!("{}", serde_json::to_string(&output)?);
-                    return Ok(());
+                    eprintln!("Unknown decision status, falling back to asking user normally");
+                    std::process::exit(1);
                 }
             }
         }
@@ -301,7 +288,7 @@ impl Cmd {
 mod tests {
     use crate::cmd::Cmd;
     use crate::config::Config;
-    use crate::models::{HookOutput, NotifyPayload, PreToolUseInput, ToolInfo};
+    use crate::models::{HookOutput, NotifyPayload, PermissionRequestInput, ToolInfo};
 
     use super::*;
     use std::sync::Mutex;
@@ -385,7 +372,7 @@ mod tests {
         std::env::remove_var("CLAUDE_AFK_BACKEND_URL");
     }
 
-    // ==================== PreToolUse Input Parsing Tests ====================
+    // ==================== PermissionRequest Input Parsing Tests ====================
 
     #[test]
     fn test_pre_tool_use_input_parse_bash() {
@@ -394,12 +381,12 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Bash",
             "tool_input": {"command": "npm test", "description": "Run tests"},
             "tool_use_id": "tool-456"
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.session_id, "sess-123");
         assert_eq!(input.tool_name, "Bash");
@@ -413,12 +400,12 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Write",
             "tool_input": {"file_path": "/home/user/file.txt", "content": "Hello world"},
             "tool_use_id": "tool-789"
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Write");
         assert_eq!(input.tool_use_id, Some("tool-789".to_string()));
@@ -431,12 +418,12 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Edit",
             "tool_input": {"file_path": "/home/user/file.txt", "old_string": "foo", "new_string": "bar"},
             "tool_use_id": "tool-101"
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Edit");
         assert_eq!(input.tool_use_id, Some("tool-101".to_string()));
@@ -449,12 +436,12 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Read",
             "tool_input": {"file_path": "/home/user/file.txt"},
             "tool_use_id": "tool-202"
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.tool_name, "Read");
         assert_eq!(input.tool_use_id, Some("tool-202".to_string()));
@@ -467,11 +454,11 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Bash",
             "tool_input": {"command": "npm test"}
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.session_id, "sess-123");
         assert_eq!(input.tool_name, "Bash");
@@ -487,11 +474,11 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Bash",
             "tool_input": {"command": "npm test", "description": "Run unit tests"}
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
 
         match tool_info {
@@ -513,11 +500,11 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Write",
             "tool_input": {"file_path": "/home/user/file.txt", "content": "Hello world"}
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
 
         match tool_info {
@@ -539,11 +526,11 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "Edit",
             "tool_input": {"file_path": "/home/user/file.txt", "old_string": "foo", "new_string": "bar"}
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
 
         match tool_info {
@@ -567,11 +554,11 @@ mod tests {
             "transcript_path": "/tmp/transcript.json",
             "cwd": "/home/user/project",
             "permission_mode": "default",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": "SomeOtherTool",
             "tool_input": {"some_field": "some_value"}
         }"#;
-        let input: PreToolUseInput = serde_json::from_str(json).unwrap();
+        let input: PermissionRequestInput = serde_json::from_str(json).unwrap();
         let tool_info = ToolInfo::from_pre_tool_use(&input);
 
         match tool_info {
@@ -636,29 +623,25 @@ mod tests {
 
     #[test]
     fn test_hook_output_allow() {
-        let output = HookOutput::allow(Some("Auto-approved".to_string()));
+        let output = HookOutput::allow();
         let json = serde_json::to_string(&output).unwrap();
 
-        assert!(json.contains("\"permissionDecision\":\"allow\""));
-        assert!(json.contains("\"permissionDecisionReason\":\"Auto-approved\""));
+        assert!(json.contains("\"hookSpecificOutput\""));
+        assert!(json.contains("\"hookEventName\":\"PermissionRequest\""));
+        assert!(json.contains("\"behavior\":\"allow\""));
         assert!(json.contains("\"suppressOutput\":true"));
     }
 
     #[test]
     fn test_hook_output_deny() {
-        let output = HookOutput::deny("Security risk".to_string());
+        let output = HookOutput::deny(Some("Security risk".to_string()));
         let json = serde_json::to_string(&output).unwrap();
 
-        assert!(json.contains("\"permissionDecision\":\"deny\""));
-        assert!(json.contains("\"permissionDecisionReason\":\"Security risk\""));
-    }
-
-    #[test]
-    fn test_hook_output_ask() {
-        let output = HookOutput::ask(None);
-        let json = serde_json::to_string(&output).unwrap();
-
-        assert!(json.contains("\"permissionDecision\":\"ask\""));
+        assert!(json.contains("\"hookSpecificOutput\""));
+        assert!(json.contains("\"hookEventName\":\"PermissionRequest\""));
+        assert!(json.contains("\"behavior\":\"deny\""));
+        assert!(json.contains("\"message\":\"Security risk\""));
+        assert!(json.contains("\"interrupt\":true"));
     }
 
     // ==================== API Response Parsing Tests ====================

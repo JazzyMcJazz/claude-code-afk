@@ -30,12 +30,12 @@ pub struct DecisionStatusResponse {
     pub decision: Option<String>,
 }
 
-// ==================== PreToolUse Input Structures ====================
+// ==================== PermissionRequest Input Structures ====================
 
-/// Main input structure for PreToolUse hook
+/// Main input structure for PermissionRequest hook
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-pub struct PreToolUseInput {
+pub struct PermissionRequestInput {
     pub session_id: String,
     pub transcript_path: String,
     pub cwd: String,
@@ -110,7 +110,7 @@ pub enum ToolInfo {
 
 impl ToolInfo {
     /// Parse tool_input based on tool_name
-    pub fn from_pre_tool_use(input: &PreToolUseInput) -> Self {
+    pub fn from_pre_tool_use(input: &PermissionRequestInput) -> Self {
         match input.tool_name.as_str() {
             "Bash" => {
                 if let Ok(bash) = serde_json::from_value::<BashToolInput>(input.tool_input.clone())
@@ -246,55 +246,57 @@ impl ToolInfo {
 
 // ==================== Hook Output Structures ====================
 
-/// Output structure for PreToolUse hook response
+/// Output structure for PermissionRequest hook response
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hook_specific_output: Option<PreToolUseOutput>,
+    pub hook_specific_output: Option<PermissionRequestOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppress_output: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreToolUseOutput {
+pub struct PermissionRequestOutput {
     pub hook_event_name: String,
-    pub permission_decision: String,
+    pub decision: PermissionRequestDecision,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRequestDecision {
+    pub behavior: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_decision_reason: Option<String>,
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupt: Option<bool>,
 }
 
 impl HookOutput {
-    pub fn allow(reason: Option<String>) -> Self {
+    pub fn allow() -> Self {
         HookOutput {
-            hook_specific_output: Some(PreToolUseOutput {
-                hook_event_name: "PreToolUse".to_string(),
-                permission_decision: "allow".to_string(),
-                permission_decision_reason: reason,
+            hook_specific_output: Some(PermissionRequestOutput {
+                hook_event_name: "PermissionRequest".to_string(),
+                decision: PermissionRequestDecision {
+                    behavior: "allow".to_string(),
+                    message: None,
+                    interrupt: None,
+                },
             }),
             suppress_output: Some(true),
         }
     }
 
-    #[allow(dead_code)]
-    pub fn deny(reason: String) -> Self {
+    pub fn deny(message: Option<String>) -> Self {
         HookOutput {
-            hook_specific_output: Some(PreToolUseOutput {
-                hook_event_name: "PreToolUse".to_string(),
-                permission_decision: "deny".to_string(),
-                permission_decision_reason: Some(reason),
-            }),
-            suppress_output: None,
-        }
-    }
-
-    pub fn ask(reason: Option<String>) -> Self {
-        HookOutput {
-            hook_specific_output: Some(PreToolUseOutput {
-                hook_event_name: "PreToolUse".to_string(),
-                permission_decision: "ask".to_string(),
-                permission_decision_reason: reason,
+            hook_specific_output: Some(PermissionRequestOutput {
+                hook_event_name: "PermissionRequest".to_string(),
+                decision: PermissionRequestDecision {
+                    behavior: "deny".to_string(),
+                    message: message,
+                    interrupt: Some(true),
+                },
             }),
             suppress_output: None,
         }

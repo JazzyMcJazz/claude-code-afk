@@ -52,7 +52,7 @@ sw.addEventListener('notificationclick', (event) => {
     const notificationData = event.notification.data || {};
     const action = event.action;
 
-    // If this is a decision notification and user clicked "Allow"
+    // If this is a decision notification and user clicked "Allow" button
     if (action === 'allow' && notificationData.type === 'decision') {
         event.notification.close();
         event.waitUntil(
@@ -61,7 +61,7 @@ sw.addEventListener('notificationclick', (event) => {
         return;
     }
 
-    // If this is a decision notification and user clicked "Dismiss"
+    // If this is a decision notification and user clicked "Dismiss" button
     if (action === 'dismiss' && notificationData.type === 'decision') {
         event.notification.close();
         event.waitUntil(
@@ -70,7 +70,17 @@ sw.addEventListener('notificationclick', (event) => {
         return;
     }
 
-    // Default click behavior (clicked notification body, not an action button)
+    // If this is a decision notification and user clicked the notification body
+    // (not an action button) - treat as "allow" since Android doesn't show action buttons
+    if (!action && notificationData.type === 'decision' && notificationData.decisionId) {
+        event.notification.close();
+        event.waitUntil(
+            submitDecision(notificationData.decisionId, notificationData.toolUseId, 'allow')
+        );
+        return;
+    }
+
+    // Default click behavior for non-decision notifications
     event.notification.close();
 
     event.waitUntil(
