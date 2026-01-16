@@ -188,7 +188,7 @@ impl ToolInfo {
                 command,
                 description,
             } => {
-                let title = "Bash Command".to_string();
+                let title = "Run bash command? 🐚".to_string();
                 let message = if let Some(desc) = description {
                     format!("{}\n\n{}", desc, command)
                 } else {
@@ -200,7 +200,7 @@ impl ToolInfo {
                 file_path,
                 content_preview,
             } => {
-                let title = "Write File".to_string();
+                let title = "Write file? 📝".to_string();
                 let message = format!("{}\n\n{}", file_path, content_preview);
                 (title, message)
             }
@@ -209,7 +209,7 @@ impl ToolInfo {
                 old_string,
                 new_string,
             } => {
-                let title = "Edit File".to_string();
+                let title = "Edit file? 📝".to_string();
                 let old_preview = if old_string.len() > 50 {
                     format!("{}...", &old_string[..50])
                 } else {
@@ -224,7 +224,7 @@ impl ToolInfo {
                 (title, message)
             }
             ToolInfo::Read { file_path } => {
-                let title = "Read File".to_string();
+                let title = "Read file? 📝".to_string();
                 let message = file_path.clone();
                 (title, message)
             }
@@ -294,7 +294,7 @@ impl HookOutput {
                 hook_event_name: "PermissionRequest".to_string(),
                 decision: PermissionRequestDecision {
                     behavior: "deny".to_string(),
-                    message: message,
+                    message,
                     interrupt: Some(true),
                 },
             }),
