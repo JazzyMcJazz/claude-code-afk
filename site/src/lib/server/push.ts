@@ -7,6 +7,10 @@ export interface NotificationPayload {
 	icon?: string;
 	badge?: string;
 	data?: Record<string, unknown>;
+	tag?: string;
+	renotify?: boolean;
+	requireInteraction?: boolean;
+	actions?: Array<{ action: string; title: string }>;
 }
 
 // Lazy initialization - only runs at runtime when actually sending notifications
