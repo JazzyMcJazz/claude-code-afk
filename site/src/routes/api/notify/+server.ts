@@ -80,6 +80,11 @@ export const POST: RequestHandler = async ({ request }) => {
 					action: 'allow',
 					title: 'Allow',
 					icon: '/icon-192.png'
+				},
+				{
+					action: 'dismiss',
+					title: 'Dismiss',
+					icon: '/badge-72.png'
 				}
 			],
 			data: {

@@ -61,6 +61,15 @@ sw.addEventListener('notificationclick', (event) => {
         return;
     }
 
+    // If this is a decision notification and user clicked "Dismiss"
+    if (action === 'dismiss' && notificationData.type === 'decision') {
+        event.notification.close();
+        event.waitUntil(
+            submitDecision(notificationData.decisionId, notificationData.toolUseId, 'dismiss')
+        );
+        return;
+    }
+
     // Default click behavior (clicked notification body, not an action button)
     event.notification.close();
 
