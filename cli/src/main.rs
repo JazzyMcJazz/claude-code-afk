@@ -32,7 +32,7 @@ enum Commands {
     /// Enable notifications
     Activate,
     /// Alias for Activate
-    AFK,
+    Afk,
     /// Disable notifications
     Deactivate,
     /// Alias for Deactivate
@@ -72,7 +72,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Pair) => Cmd::pair(),
         Some(Commands::Notify { json }) => Cmd::notify(json),
         Some(Commands::Status) => Cmd::status(),
-        Some(Commands::Activate) | Some(Commands::AFK) => Cmd::activate(),
+        Some(Commands::Activate) | Some(Commands::Afk) => Cmd::activate(),
         Some(Commands::Deactivate) | Some(Commands::Back) => Cmd::deactivate(),
         Some(Commands::Clear) => Cmd::clear(),
         Some(Commands::InstallHooks) => Cmd::install_hooks(),

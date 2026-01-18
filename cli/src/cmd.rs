@@ -76,7 +76,8 @@ impl Cmd {
                 backend_url, response.pairing_id
             ))
             .call()?
-            .into_body().read_json()?;
+            .into_body()
+            .read_json()?;
 
             if status.complete {
                 if let Some(device_token) = status.device_token {
@@ -137,9 +138,7 @@ impl Cmd {
 
         // Handle based on hook type
         match generic_input.hook_event_name.as_str() {
-            "Notification" => {
-                Self::handle_notification(&input, &device_token, &backend_url)
-            }
+            "Notification" => Self::handle_notification(&input, &device_token, &backend_url),
             "PermissionRequest" => {
                 Self::handle_permission_request(&input, &device_token, &backend_url)
             }
@@ -492,9 +491,7 @@ impl Cmd {
 
         // Find the Claude Code settings file
         let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))?;
-        let settings_path = PathBuf::from(&home)
-            .join(".claude")
-            .join("settings.json");
+        let settings_path = PathBuf::from(&home).join(".claude").join("settings.json");
 
         // Ensure .claude directory exists
         if let Some(parent) = settings_path.parent() {
@@ -538,9 +535,7 @@ impl Cmd {
             .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
 
-        let hooks_obj = hooks
-            .as_object_mut()
-            .ok_or("Hooks is not an object")?;
+        let hooks_obj = hooks.as_object_mut().ok_or("Hooks is not an object")?;
 
         // Helper closure to check if a hook entry contains claude-afk
         let contains_claude_afk = |hook: &serde_json::Value| -> bool {
@@ -606,7 +601,8 @@ impl Cmd {
         println!("    when it needs your input or is waiting.");
         println!();
 
-        println!("  {} Run {} to enable notifications",
+        println!(
+            "  {} Run {} to enable notifications",
             "Tip:".dimmed(),
             "claude-afk activate".cyan()
         );
@@ -635,9 +631,7 @@ impl Cmd {
             Err(_) => return false,
         };
 
-        let settings_path = PathBuf::from(&home)
-            .join(".claude")
-            .join("settings.json");
+        let settings_path = PathBuf::from(&home).join(".claude").join("settings.json");
 
         if !settings_path.exists() {
             return false;
