@@ -2,6 +2,23 @@
 name = "claude-afk"
 version = "0.1.0"
 edition = "2021"
+authors = ["JazzyMcJazz"]
+description = "Push notifications to your phone when Claude Code needs your attention"
+documentation = "https://github.com/JazzyMcJazz/claude-code-afk"
+readme = "../README.md"
+homepage = "https://github.com/JazzyMcJazz/claude-code-afk"
+repository = "https://github.com/JazzyMcJazz/claude-code-afk"
+license = "MIT"
+keywords = ["claude", "notifications", "push-notifications", "cli", "automation"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    ".github/",
+    "tests/",
+]
+
+[[bin]]
+name = "claude-afk"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
