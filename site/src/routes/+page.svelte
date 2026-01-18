@@ -10,7 +10,7 @@
 			<h1
 				class="mb-4 bg-linear-to-r from-blue-600 to-purple-600 bg-clip-text text-5xl font-bold text-transparent dark:from-blue-400 dark:to-purple-400"
 			>
-				Claude Code AFK
+				Claude AFK
 			</h1>
 			<p class="mb-8 text-xl text-gray-600 dark:text-gray-300">
 				Get push notifications to your phone when Claude Code needs your attention
@@ -41,7 +41,7 @@
 				<div class="mb-4 text-3xl">📱</div>
 				<h3 class="mb-2 text-xl font-semibold">Push Notifications</h3>
 				<p class="text-gray-600 dark:text-gray-400">
-					Receive instant notifications on your phone when Claude Code requires input
+					Receive instant notifications on your phone when Claude Code requires input - no app required
 				</p>
 			</div>
 			<div class="rounded-xl bg-gray-50 p-6 dark:bg-gray-800">
@@ -133,18 +133,11 @@
 					</div>
 					<div class="text-2xl">→</div>
 					<div class="text-center">
-						<div class="rounded-lg bg-white px-4 py-3 shadow dark:bg-gray-700">CLI Tool</div>
-						<div class="mt-1 text-xs text-gray-500">Rust</div>
-					</div>
-					<div class="text-2xl">→</div>
-					<div class="text-center">
-						<div class="rounded-lg bg-white px-4 py-3 shadow dark:bg-gray-700">Backend</div>
-						<div class="mt-1 text-xs text-gray-500">SvelteKit</div>
+						<div class="rounded-lg bg-white px-4 py-3 shadow dark:bg-gray-700">Claude AFK</div>
 					</div>
 					<div class="text-2xl">→</div>
 					<div class="text-center">
 						<div class="rounded-lg bg-white px-4 py-3 shadow dark:bg-gray-700">Your Phone</div>
-						<div class="mt-1 text-xs text-gray-500">Web Push</div>
 					</div>
 				</div>
 			</div>
@@ -156,32 +149,22 @@
 		<div class="mx-auto max-w-3xl">
 			<h2 class="mb-8 text-center text-3xl font-bold">Quick Start</h2>
 			<div class="rounded-xl bg-gray-900 p-6 text-gray-100">
-				<div class="space-y-4 font-mono text-sm">
-					<div>
-						<div class="text-gray-400"># Install the CLI</div>
-						<div class="text-green-400">cargo build --release</div>
-					</div>
-					<div>
-						<div class="text-gray-400"># Pair your device</div>
-						<div class="text-green-400">claude-afk setup</div>
-					</div>
-					<div>
-						<div class="text-gray-400"># Test notification</div>
-						<div class="text-green-400">
-							echo '&#123;"message":"Hello!"&#125;' | claude-afk notify
-						</div>
-					</div>
-				</div>
-			</div>
-			<div class="mt-4 text-center">
-				<a
-					href="https://github.com/JazzyMcJazz/claude-code-afk"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="text-blue-600 hover:underline dark:text-blue-400"
-				>
-					View full documentation →
-				</a>
+				<code class="block bg-black/40 p-4 rounded-lg">
+					<span class="block text-gray-400"># Install the CLI (Rust is required)</span>
+					<span class="block text-green-400">cargo install claude-afk</span>
+					<br />
+					<span class="block text-gray-400"># Pair your device</span>
+					<span class="block text-green-400">claude-afk pair</span>
+					<br />
+					<span class="block text-gray-400"># Install Claude Code hooks</span>
+					<span class="block text-green-400">claude-afk install-hooks</span>
+					<br />
+					<span class="block text-gray-400"># Enable notifications</span>
+					<span class="block text-green-400">claude-afk afk</span>
+					<br />
+					<span class="block text-gray-400"># Disable notifications when you are back</span>
+					<span class="block text-green-400">claude-afk back</span>
+				</code>
 			</div>
 		</div>
 	</section>

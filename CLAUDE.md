@@ -155,16 +155,18 @@ Config stored using `confy` crate in platform-appropriate location:
 
 Config fields: `device_token`, `backend_url`, `active`
 
-Backend URL: Uses `https://ccafk.treeleaf.dev` by default. Can be overridden with `CLAUDE_AFK_BACKEND_URL` env var for local development.
+Backend URL: Uses `https://ccafk.treeleaf.dev` by default. Can be overridden with `CLAUDE_AFK_API_URL` env var for local development.
 
 ### CLI Commands
 
-- `setup` - Generate QR code and poll for pairing completion
+- `pair` - Generate QR code and poll for pairing completion
 - `notify` - Read JSON from stdin and send notification (exits silently if not configured/active)
 - `status` - Show configuration status
-- `activate` - Enable notifications
-- `deactivate` - Disable notifications (keeps pairing)
+- `afk` - Enable notifications
+- `back` - Disable notifications (keeps pairing)
 - `clear` - Remove device pairing
+- `install-hooks` - Install Claude Code hooks for push notifications
+- `clear-logs` - Clear all debug logs (debug builds only)
 
 ### Service Worker
 
@@ -189,7 +191,7 @@ Located at `site/static/sw.js`. Handles:
 
 ## Testing Strategy
 
-- **CLI**: Unit tests in `cli/src/main.rs` (config, parsing, URL construction, state logic)
+- **CLI**: Unit tests in `cli/src/cmd.rs` (config, parsing, URL construction, state logic)
 - **Backend**: Tests in `backend/src/*.spec.ts` using Vitest
 - **E2E**: Manual testing flow documented in README.md
 

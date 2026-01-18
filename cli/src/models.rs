@@ -30,7 +30,15 @@ pub struct DecisionStatusResponse {
     pub decision: Option<String>,
 }
 
-// ==================== PermissionRequest Input Structures ====================
+// ==================== Hook Input Structures ====================
+
+/// Generic hook input to determine the hook type
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct GenericHookInput {
+    pub session_id: String,
+    pub hook_event_name: String,
+}
 
 /// Main input structure for PermissionRequest hook
 #[derive(Debug, Deserialize)]
@@ -45,6 +53,19 @@ pub struct PermissionRequestInput {
     pub tool_input: Value,
     #[serde(default)]
     pub tool_use_id: Option<String>,
+}
+
+/// Input structure for Notification hook
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct NotificationInput {
+    pub session_id: String,
+    pub transcript_path: String,
+    pub cwd: String,
+    pub permission_mode: String,
+    pub hook_event_name: String,
+    pub message: String,
+    pub notification_type: String,
 }
 
 /// Bash tool input
@@ -311,4 +332,12 @@ pub struct NotifyPayload {
     pub message: String,
     pub tool_use_id: String,
     pub session_id: String,
+}
+
+/// Simple notification payload for informational notifications (e.g., idle_prompt)
+/// that don't require user decisions
+#[derive(Debug, Serialize)]
+pub struct SimpleNotifyPayload {
+    pub title: String,
+    pub message: String,
 }

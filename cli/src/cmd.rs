@@ -1,48 +1,72 @@
-use std::{io::Read, thread, time::Instant};
+use std::{fs, io::Read, path::PathBuf, thread, time::Instant};
 
+use colored::Colorize;
 use nanoid::nanoid;
 use qrcode::{render::unicode::Dense1x2, QrCode};
 
 use crate::{
     config::Config,
     constants::{
-        DECISION_POLL_INTERVAL, DECISION_TIMEOUT, DEFAULT_BACKEND_URL, POLL_INTERVAL, SETUP_TIMEOUT,
+        DECISION_POLL_INTERVAL, DECISION_TIMEOUT, DEFAULT_API_URL, POLL_INTERVAL, SETUP_TIMEOUT,
     },
     logger::Logger,
     models::{
-        DecisionStatusResponse, HookOutput, NotifyPayload, NotifyResponse, PairingInitResponse,
-        PairingStatusResponse, PermissionRequestInput, ToolInfo,
+        DecisionStatusResponse, GenericHookInput, HookOutput, NotificationInput, NotifyPayload,
+        NotifyResponse, PairingInitResponse, PairingStatusResponse, PermissionRequestInput,
+        SimpleNotifyPayload, ToolInfo,
     },
 };
 
 pub struct Cmd;
 
 impl Cmd {
-    pub fn setup() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn pair() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = Config::load()?;
 
         let backend_url = Self::get_backend_url();
         let backend_url = backend_url.trim_end_matches('/');
 
         // Initiate pairing
-        println!("Initiating pairing with {}...", backend_url);
+        println!();
+        println!("  {} {}", "◆".cyan(), "Claude AFK Pairing".bold());
+        println!("  {} {}", "→".dimmed(), backend_url.dimmed());
+        println!();
+
         let response: PairingInitResponse =
             ureq::post(&format!("{}/api/pairing/initiate", backend_url))
-                .call()?
-                .into_json()?;
+                .send_empty()?
+                .into_body()
+                .read_json()?;
 
         let pairing_url = format!("{}/pair/{}", backend_url, response.pairing_token);
 
-        println!("\nScan this QR code with your phone to complete setup:\n");
+        println!("  📱 Scan this QR code with your phone:");
+        println!();
         Self::render_qr(&pairing_url)?;
-        println!("\nOr open this URL: {}", pairing_url);
-        println!("\nWaiting for pairing to complete...");
+        println!();
+        println!(
+            "  {} {}",
+            "Or open:".dimmed(),
+            pairing_url.cyan().underline()
+        );
+        println!();
+        println!(
+            "  {} Waiting for pairing... {}",
+            "◌".yellow(),
+            "(press Ctrl+C to cancel)".dimmed()
+        );
 
         // Poll for completion
         let start = Instant::now();
         loop {
             if start.elapsed() > SETUP_TIMEOUT {
-                return Err("Pairing timed out after 5 minutes".into());
+                println!();
+                println!(
+                    "  {} {}",
+                    "✗".red(),
+                    "Pairing timed out after 5 minutes".red()
+                );
+                return Err("Pairing timed out".into());
             }
 
             thread::sleep(POLL_INTERVAL);
@@ -52,7 +76,7 @@ impl Cmd {
                 backend_url, response.pairing_id
             ))
             .call()?
-            .into_json()?;
+            .into_body().read_json()?;
 
             if status.complete {
                 if let Some(device_token) = status.device_token {
@@ -61,7 +85,18 @@ impl Cmd {
                     config.active = true;
                     Config::save(&config)?;
 
-                    println!("\nPairing successful! Notifications are now enabled.");
+                    println!();
+                    println!(
+                        "  {} {}",
+                        "✓".green().bold(),
+                        "Pairing successful!".green().bold()
+                    );
+                    println!(
+                        "    {} Notifications are now {}",
+                        "→".dimmed(),
+                        "enabled".green()
+                    );
+                    println!();
                     return Ok(());
                 } else {
                     return Err("Pairing completed but no device token received".into());
@@ -91,10 +126,84 @@ impl Cmd {
             }
         };
 
-        let pre_tool_use: PermissionRequestInput = match serde_json::from_str(&input) {
+        // First, determine the hook type
+        let generic_input: GenericHookInput = match serde_json::from_str(&input) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("{}", &format!("Failed to parse PermissionRequest input: {}", e));
+                eprintln!("{}", &format!("Failed to parse hook input: {}", e));
+                std::process::exit(1);
+            }
+        };
+
+        // Handle based on hook type
+        match generic_input.hook_event_name.as_str() {
+            "Notification" => {
+                Self::handle_notification(&input, &device_token, &backend_url)
+            }
+            "PermissionRequest" => {
+                Self::handle_permission_request(&input, &device_token, &backend_url)
+            }
+            _ => {
+                eprintln!("Unknown hook event: {}", generic_input.hook_event_name);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    fn handle_notification(
+        input: &str,
+        device_token: &str,
+        backend_url: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let notification: NotificationInput = match serde_json::from_str(input) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("{}", &format!("Failed to parse Notification input: {}", e));
+                std::process::exit(1);
+            }
+        };
+
+        // Only handle idle_prompt notifications
+        if notification.notification_type != "idle_prompt" {
+            // For other notification types, exit silently
+            std::process::exit(0);
+        }
+
+        // Use simple notification endpoint - no decision tracking needed
+        let payload = SimpleNotifyPayload {
+            title: "Claude is waiting".to_string(),
+            message: notification.message.clone(),
+        };
+
+        // Send notification and exit immediately (no decision polling for notifications)
+        match ureq::post(&format!("{}/api/notify/simple", backend_url))
+            .header("Authorization", &format!("Bearer {}", device_token))
+            .send_json(&payload)
+        {
+            Ok(_) => {
+                Logger::debug("Notification sent successfully");
+            }
+            Err(e) => {
+                eprintln!("{}", &format!("Failed to send notification: {}", e));
+            }
+        }
+
+        // Exit silently - notifications don't need any output
+        std::process::exit(0);
+    }
+
+    fn handle_permission_request(
+        input: &str,
+        device_token: &str,
+        backend_url: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pre_tool_use: PermissionRequestInput = match serde_json::from_str(input) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "{}",
+                    &format!("Failed to parse PermissionRequest input: {}", e)
+                );
                 std::process::exit(1);
             }
         };
@@ -119,10 +228,10 @@ impl Cmd {
         // Send notification to backend and get decision ID
         let notify_response: NotifyResponse =
             match ureq::post(&format!("{}/api/notify", backend_url))
-                .set("Authorization", &format!("Bearer {}", device_token))
+                .header("Authorization", &format!("Bearer {}", device_token))
                 .send_json(&payload)
             {
-                Ok(resp) => match resp.into_json() {
+                Ok(resp) => match resp.into_body().read_json() {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("{}", &format!("Failed to parse notify response: {}", e));
@@ -152,10 +261,10 @@ impl Cmd {
                 "{}/api/decision/{}/status",
                 backend_url, decision_id
             ))
-            .set("Authorization", &format!("Bearer {}", device_token))
+            .header("Authorization", &format!("Bearer {}", device_token))
             .call()
             {
-                Ok(resp) => match resp.into_json() {
+                Ok(resp) => match resp.into_body().read_json() {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("{}", &format!("Failed to parse decision status: {}", e));
@@ -184,7 +293,7 @@ impl Cmd {
                         Some("dismiss") => {
                             // Dismissed decision - exit silently
                             std::process::exit(0);
-                        },
+                        }
                         _ => {
                             // Unknown decision - exit silently
                             eprintln!("Unknown decision");
@@ -208,21 +317,62 @@ impl Cmd {
     pub fn status() -> Result<(), Box<dyn std::error::Error>> {
         let config = Config::load()?;
 
-        let backend_url = Self::get_backend_url();
         let device_paired = config.device_token.is_some();
         let notifications_active = config.active;
+        let hooks_installed = Self::hooks_installed();
 
-        println!("Claude AFK Status");
-        println!("-----------------");
-        println!("Backend URL: {}", backend_url);
-        println!(
-            "Device paired: {}",
-            if device_paired { "yes" } else { "no" }
-        );
-        println!(
-            "Notifications active: {}",
-            if notifications_active { "yes" } else { "no" }
-        );
+        println!();
+        println!("  {} {}", "◆".cyan(), "Claude AFK Status".bold());
+        println!();
+
+        // Device pairing status
+        let (pair_icon, pair_status) = if device_paired {
+            ("✓".green(), "Paired".green())
+        } else {
+            ("✗".red(), "Not paired".red())
+        };
+        println!("  {} Device          {}", pair_icon, pair_status);
+
+        // Notifications status
+        let (notif_icon, notif_status) = if notifications_active {
+            ("✓".green(), "Active".green())
+        } else {
+            ("○".yellow(), "Inactive".yellow())
+        };
+        println!("  {} Notifications   {}", notif_icon, notif_status);
+
+        // Hooks status
+        let (hooks_icon, hooks_status) = if hooks_installed {
+            ("✓".green(), "Installed".green())
+        } else {
+            ("○".yellow(), "Not installed".yellow())
+        };
+        println!("  {} Hooks           {}", hooks_icon, hooks_status);
+
+        // Helpful hints
+        if !device_paired {
+            println!();
+            println!(
+                "  {} Run {} to set up notifications",
+                "Tip:".dimmed(),
+                "claude-afk pair".cyan()
+            );
+        } else if !hooks_installed {
+            println!();
+            println!(
+                "  {} Run {} to install Claude Code hooks",
+                "Tip:".dimmed(),
+                "claude-afk install-hook".cyan()
+            );
+        } else if !notifications_active {
+            println!();
+            println!(
+                "  {} Run {} to enable notifications",
+                "Tip:".dimmed(),
+                "claude-afk activate".cyan()
+            );
+        }
+        println!();
 
         Ok(())
     }
@@ -231,45 +381,318 @@ impl Cmd {
         let mut config = Config::load()?;
 
         if config.device_token.is_none() {
-            return Err("No device paired. Run 'claude-afk setup' first.".into());
+            println!();
+            println!("  {} {}", "✗".red(), "No device paired".red());
+            println!(
+                "    {} Run {} first",
+                "→".dimmed(),
+                "claude-afk pair".cyan()
+            );
+            println!();
+            return Err("No device paired".into());
+        }
+
+        if config.active {
+            println!();
+            println!(
+                "  {} Notifications are already {}",
+                "○".dimmed(),
+                "active".green()
+            );
+            println!();
+            return Ok(());
         }
 
         config.active = true;
         Config::save(&config)?;
 
-        println!("Notifications activated.");
+        println!();
+        println!(
+            "  {} Notifications {}",
+            "✓".green().bold(),
+            "activated".green().bold()
+        );
+        println!(
+            "    {} You'll receive push notifications when Claude needs input",
+            "→".dimmed()
+        );
+        println!();
         Ok(())
     }
 
     pub fn deactivate() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = Config::load()?;
+
+        if !config.active {
+            println!();
+            println!(
+                "  {} Notifications are already {}",
+                "○".dimmed(),
+                "inactive".yellow()
+            );
+            println!();
+            return Ok(());
+        }
+
         config.active = false;
         Config::save(&config)?;
 
-        println!("Notifications deactivated.");
+        println!();
+        println!(
+            "  {} Notifications {}",
+            "○".yellow(),
+            "deactivated".yellow()
+        );
+        println!(
+            "    {} Run {} to re-enable",
+            "→".dimmed(),
+            "claude-afk activate".cyan()
+        );
+        println!();
         Ok(())
     }
 
     pub fn clear() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = Config::load()?;
+
+        if config.device_token.is_none() {
+            println!();
+            println!(
+                "  {} {}",
+                "○".dimmed(),
+                "No device pairing to clear".dimmed()
+            );
+            println!();
+            return Ok(());
+        }
+
         config.device_token = None;
         config.active = false;
         Config::save(&config)?;
 
-        println!("Device pairing cleared.");
+        println!();
+        println!("  {} Device pairing {}", "✓".green(), "cleared".white());
+        println!(
+            "    {} Run {} to pair a new device",
+            "→".dimmed(),
+            "claude-afk pair".cyan()
+        );
+        println!();
+        Ok(())
+    }
+
+    pub fn install_hooks() -> Result<(), Box<dyn std::error::Error>> {
+        println!();
+        println!("  {} {}", "◆".cyan(), "Installing Claude Code Hooks".bold());
+        println!();
+
+        // Get the path to the current executable
+        let exe_path = std::env::current_exe()?;
+        let exe_path_str = exe_path.to_string_lossy().to_string();
+
+        // Find the Claude Code settings file
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))?;
+        let settings_path = PathBuf::from(&home)
+            .join(".claude")
+            .join("settings.json");
+
+        // Ensure .claude directory exists
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Read existing settings or create empty object
+        let mut settings: serde_json::Value = if settings_path.exists() {
+            let content = fs::read_to_string(&settings_path)?;
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        // Create the PermissionRequest hook structure (wildcard matcher)
+        let permission_hook_entry = serde_json::json!({
+            "matcher": "*",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": exe_path_str
+                }
+            ]
+        });
+
+        // Create the Notification hook structure (idle_prompt only)
+        let notification_hook_entry = serde_json::json!({
+            "matcher": "idle_prompt",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": exe_path_str
+                }
+            ]
+        });
+
+        // Get or create the hooks object
+        let hooks = settings
+            .as_object_mut()
+            .ok_or("Settings is not an object")?
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}));
+
+        let hooks_obj = hooks
+            .as_object_mut()
+            .ok_or("Hooks is not an object")?;
+
+        // Helper closure to check if a hook entry contains claude-afk
+        let contains_claude_afk = |hook: &serde_json::Value| -> bool {
+            if let Some(inner_hooks) = hook.get("hooks").and_then(|h| h.as_array()) {
+                inner_hooks.iter().any(|h| {
+                    h.get("command")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.contains("claude-afk"))
+                        .unwrap_or(false)
+                })
+            } else {
+                false
+            }
+        };
+
+        // Install PermissionRequest hook
+        let permission_request = hooks_obj
+            .entry("PermissionRequest")
+            .or_insert_with(|| serde_json::json!([]));
+
+        let permission_array = permission_request
+            .as_array_mut()
+            .ok_or("PermissionRequest is not an array")?;
+
+        // Remove any existing claude-afk hooks and add the new one
+        permission_array.retain(|hook| !contains_claude_afk(hook));
+        permission_array.push(permission_hook_entry);
+
+        // Install Notification hook
+        let notification = hooks_obj
+            .entry("Notification")
+            .or_insert_with(|| serde_json::json!([]));
+
+        let notification_array = notification
+            .as_array_mut()
+            .ok_or("Notification is not an array")?;
+
+        // Remove any existing claude-afk hooks and add the new one
+        notification_array.retain(|hook| !contains_claude_afk(hook));
+        notification_array.push(notification_hook_entry);
+
+        // Write the settings back
+        let formatted = serde_json::to_string_pretty(&settings)?;
+        fs::write(&settings_path, formatted)?;
+
+        println!(
+            "  {} Hooks installed to {}",
+            "✓".green().bold(),
+            "~/.claude/settings.json".cyan()
+        );
+        println!();
+        println!("  {} Binary path:", "→".dimmed());
+        println!("    {}", exe_path_str.dimmed());
+        println!();
+        println!("  {} Installed hooks:", "→".dimmed());
+        println!("    • PermissionRequest (all tools)");
+        println!("    • Notification (idle_prompt)");
+        println!();
+        println!(
+            "  {} Claude Code will now send push notifications",
+            "✓".green()
+        );
+        println!("    when it needs your input or is waiting.");
+        println!();
+
+        println!("  {} Run {} to enable notifications",
+            "Tip:".dimmed(),
+            "claude-afk activate".cyan()
+        );
+        println!();
+
         Ok(())
     }
 
     #[cfg(debug_assertions)]
     pub fn clear_logs() -> Result<(), Box<dyn std::error::Error>> {
         Logger::clear_logs()?;
-        println!("Debug logs cleared.");
+        println!();
+        println!("  {} Debug logs {}", "✓".green(), "cleared".white());
+        println!();
         Ok(())
     }
 
     fn get_backend_url() -> String {
         // Priority: env var (for local development) > default production URL
-        std::env::var("CLAUDE_AFK_BACKEND_URL").unwrap_or_else(|_| DEFAULT_BACKEND_URL.to_string())
+        std::env::var("CLAUDE_AFK_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string())
+    }
+
+    fn hooks_installed() -> bool {
+        let home = match std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+
+        let settings_path = PathBuf::from(&home)
+            .join(".claude")
+            .join("settings.json");
+
+        if !settings_path.exists() {
+            return false;
+        }
+
+        let content = match fs::read_to_string(&settings_path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let settings: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        // Check if hooks object exists with claude-afk entries
+        let hooks = match settings.get("hooks") {
+            Some(h) => h,
+            None => return false,
+        };
+
+        // Helper to check if a hook array contains claude-afk
+        let has_claude_afk = |hook_array: &serde_json::Value| -> bool {
+            hook_array
+                .as_array()
+                .map(|arr| {
+                    arr.iter().any(|hook| {
+                        hook.get("hooks")
+                            .and_then(|h| h.as_array())
+                            .map(|inner| {
+                                inner.iter().any(|h| {
+                                    h.get("command")
+                                        .and_then(|c| c.as_str())
+                                        .map(|c| c.contains("claude-afk"))
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        };
+
+        // Check both PermissionRequest and Notification hooks
+        let has_permission = hooks
+            .get("PermissionRequest")
+            .map(has_claude_afk)
+            .unwrap_or(false);
+
+        let has_notification = hooks
+            .get("Notification")
+            .map(has_claude_afk)
+            .unwrap_or(false);
+
+        has_permission && has_notification
     }
 
     fn render_qr(url: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -288,7 +711,10 @@ impl Cmd {
 mod tests {
     use crate::cmd::Cmd;
     use crate::config::Config;
-    use crate::models::{HookOutput, NotifyPayload, PermissionRequestInput, ToolInfo};
+    use crate::models::{
+        GenericHookInput, HookOutput, NotificationInput, NotifyPayload, PermissionRequestInput,
+        SimpleNotifyPayload, ToolInfo,
+    };
 
     use super::*;
     use std::sync::Mutex;
@@ -355,21 +781,21 @@ mod tests {
     #[test]
     fn test_get_backend_url_returns_default() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::remove_var("CLAUDE_AFK_BACKEND_URL");
+        std::env::remove_var("CLAUDE_AFK_API_URL");
 
         let result = Cmd::get_backend_url();
-        assert_eq!(result, DEFAULT_BACKEND_URL);
+        assert_eq!(result, DEFAULT_API_URL);
     }
 
     #[test]
     fn test_get_backend_url_env_var_overrides_default() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("CLAUDE_AFK_BACKEND_URL", "http://localhost:5173");
+        std::env::set_var("CLAUDE_AFK_API_URL", "http://localhost:5173");
 
         let result = Cmd::get_backend_url();
         assert_eq!(result, "http://localhost:5173");
 
-        std::env::remove_var("CLAUDE_AFK_BACKEND_URL");
+        std::env::remove_var("CLAUDE_AFK_API_URL");
     }
 
     // ==================== PermissionRequest Input Parsing Tests ====================
@@ -583,7 +1009,7 @@ mod tests {
         };
         let (title, message) = tool_info.format_for_notification();
 
-        assert_eq!(title, "Bash Command");
+        assert_eq!(title, "Run bash command? 🐚");
         assert!(message.contains("Run unit tests"));
         assert!(message.contains("npm test"));
     }
@@ -596,7 +1022,7 @@ mod tests {
         };
         let (title, message) = tool_info.format_for_notification();
 
-        assert_eq!(title, "Write File");
+        assert_eq!(title, "Write file? 📝");
         assert!(message.contains("/home/user/file.txt"));
         assert!(message.contains("Hello world"));
     }
@@ -821,5 +1247,145 @@ mod tests {
 
         assert_eq!(header, "Bearer my-secret-token");
         assert!(header.starts_with("Bearer "));
+    }
+
+    // ==================== GenericHookInput Tests ====================
+
+    #[test]
+    fn test_generic_hook_input_parse_permission_request() {
+        let json = r#"{
+            "session_id": "sess-123",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"}
+        }"#;
+        let input: GenericHookInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.session_id, "sess-123");
+        assert_eq!(input.hook_event_name, "PermissionRequest");
+    }
+
+    #[test]
+    fn test_generic_hook_input_parse_notification() {
+        let json = r#"{
+            "session_id": "sess-456",
+            "hook_event_name": "Notification",
+            "message": "Claude is waiting",
+            "notification_type": "idle_prompt"
+        }"#;
+        let input: GenericHookInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.session_id, "sess-456");
+        assert_eq!(input.hook_event_name, "Notification");
+    }
+
+    // ==================== NotificationInput Tests ====================
+
+    #[test]
+    fn test_notification_input_parse_idle_prompt() {
+        let json = r#"{
+            "session_id": "abc123",
+            "transcript_path": "/Users/test/.claude/projects/test/00893aaf.jsonl",
+            "cwd": "/Users/test/project",
+            "permission_mode": "default",
+            "hook_event_name": "Notification",
+            "message": "Claude needs your permission to use Bash",
+            "notification_type": "idle_prompt"
+        }"#;
+        let input: NotificationInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.session_id, "abc123");
+        assert_eq!(input.hook_event_name, "Notification");
+        assert_eq!(input.message, "Claude needs your permission to use Bash");
+        assert_eq!(input.notification_type, "idle_prompt");
+    }
+
+    #[test]
+    fn test_notification_input_parse_permission_prompt() {
+        let json = r#"{
+            "session_id": "xyz789",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/project",
+            "permission_mode": "default",
+            "hook_event_name": "Notification",
+            "message": "Claude is asking for permission",
+            "notification_type": "permission_prompt"
+        }"#;
+        let input: NotificationInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.session_id, "xyz789");
+        assert_eq!(input.notification_type, "permission_prompt");
+    }
+
+    // ==================== SimpleNotifyPayload Tests ====================
+
+    #[test]
+    fn test_simple_notify_payload_serialization() {
+        let payload = SimpleNotifyPayload {
+            title: "Claude is waiting".to_string(),
+            message: "Claude needs your input".to_string(),
+        };
+
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"title\":\"Claude is waiting\""));
+        assert!(json.contains("\"message\":\"Claude needs your input\""));
+        // Should NOT contain tool_use_id or session_id
+        assert!(!json.contains("tool_use_id"));
+        assert!(!json.contains("session_id"));
+    }
+
+    #[test]
+    fn test_simple_notify_payload_minimal() {
+        let payload = SimpleNotifyPayload {
+            title: "Test".to_string(),
+            message: "Test message".to_string(),
+        };
+
+        let json = serde_json::to_string(&payload).unwrap();
+        // Verify it's a simple 2-field JSON object
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.as_object().unwrap().len(), 2);
+    }
+
+    // ==================== Hook Type Detection Tests ====================
+
+    #[test]
+    fn test_hook_type_detection_permission_request() {
+        let json = r#"{
+            "session_id": "sess-123",
+            "transcript_path": "/tmp/transcript.json",
+            "cwd": "/home/user/project",
+            "permission_mode": "default",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"}
+        }"#;
+
+        let generic: GenericHookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(generic.hook_event_name, "PermissionRequest");
+
+        // Should be able to parse as PermissionRequestInput
+        let permission: PermissionRequestInput = serde_json::from_str(json).unwrap();
+        assert_eq!(permission.tool_name, "Bash");
+    }
+
+    #[test]
+    fn test_hook_type_detection_notification() {
+        let json = r#"{
+            "session_id": "sess-456",
+            "transcript_path": "/tmp/transcript.json",
+            "cwd": "/home/user/project",
+            "permission_mode": "default",
+            "hook_event_name": "Notification",
+            "message": "Claude is idle",
+            "notification_type": "idle_prompt"
+        }"#;
+
+        let generic: GenericHookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(generic.hook_event_name, "Notification");
+
+        // Should be able to parse as NotificationInput
+        let notification: NotificationInput = serde_json::from_str(json).unwrap();
+        assert_eq!(notification.notification_type, "idle_prompt");
     }
 }

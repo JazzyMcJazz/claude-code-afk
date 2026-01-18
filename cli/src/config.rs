@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::APP_NAME;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct Config {
     pub device_token: Option<String>,
     pub backend_url: String,
